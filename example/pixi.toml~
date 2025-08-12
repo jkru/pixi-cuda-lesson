@@ -2,12 +2,19 @@
 authors = ["jkru <julie.hollek@gmail.com>"]
 channels = ["conda-forge"]
 name = "example"
-platforms = ["osx-arm64", "linux-64", "win-64"]
+platforms = ["osx-arm64"]
 version = "0.1.0"
 
 [tasks]
 lab = { cmd = "jupyter lab", description = "Launch JupyterLab" }
 start = {depends-on = [{ task = "lab" }], description = "start exploring" }
+
+[tasks.A]
+cmd = "echo hello world"
+
+[tasks.B]
+cmd = "echo hello again"
+depends-on = task = "A"
 
 
 [dependencies]
@@ -15,9 +22,3 @@ python = ">=3.13.5,<3.14"
 numpy = ">=2.3.2,<3"
 jupyterlab = ">=4.4.5,<5"
 notebook = ">=7.4.5,<8"
-
-[feature.dev.dependencies]
-pre-commit = ">=4.3.0,<5"
-
-[environments]
-dev = ["dev"]
