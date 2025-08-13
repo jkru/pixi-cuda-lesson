@@ -1,56 +1,92 @@
-Bootstrap: docker
-From: ghcr.io/prefix-dev/pixi:noble
-Stage: build
+name: Docker Images
 
-%files
-./pixi.toml /app/
-./pixi.lock /app/
-./.gitignore /app/
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths:
+      - 'cuda-exercise/pixi.toml'
+      - 'cuda-exercise/pixi.lock'
+      - 'cuda-exercise/Dockerfile'
+      - 'cuda-exercise/.dockerignore'
+      - 'cuda-exercise/app/**'
+  pull_request:
+    paths:
+      - 'cuda-exercise/pixi.toml'
+      - 'cuda-exercise/pixi.lock'
+      - 'cuda-exercise/Dockerfile'
+      - 'cuda-exercise/.dockerignore'
+      - 'cuda-exercise/app/**'
+  release:
+    types: [published]
+  workflow_dispatch:
 
-%post
-#!/bin/bash
-export CONDA_OVERRIDE_CUDA=12
-cd /app/
-pixi info
-pixi install --locked --environment gpu
-echo "#!/bin/bash" > /app/entrypoint.sh && \
-pixi shell-hook --environment gpu -s bash >> /app/entrypoint.sh && \
-echo 'exec "$@"' >> /app/entrypoint.sh
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+permissions: {}
 
-Bootstrap: docker
-From: ghcr.io/prefix-dev/pixi:noble
-Stage: final
+jobs:
+  docker:
+    name: Build and publish images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
-%files from build
-/app/.pixi/envs/gpu /app/.pixi/envs/gpu
-/app/pixi.toml /app/pixi.toml
-/app/pixi.lock /app/pixi.lock
-/app/.gitignore /app/.gitignore
-# The ignore files are needed for 'pixi run' to work in the container
-/app/.pixi/.gitignore /app/.pixi/.gitignore
-/app/.pixi/.condapackageignore /app/.pixi/.condapackageignore
-/app/entrypoint.sh /app/entrypoint.sh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-%files
-./app /app/src
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=raw,value=gpu-noble-cuda-12.9
+            type=raw,value=latest
+            type=sha
+            type=sha,prefix=gpu-noble-cuda-12.9-sha-
 
-%post
-#!/bin/bash
-cd /app/
-pixi info
-chmod +x /app/entrypoint.sh
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-%runscript
-#!/bin/bash
-/app/entrypoint.sh "$@"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-%startscript
-#!/bin/bash
-/app/entrypoint.sh "$@"
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-%test
-#!/bin/bash -e
-. /app/entrypoint.sh
-pixi info
-pixi list
+      - name: Test build
+        id: docker_build_test
+        uses: docker/build-push-action@v6
+        with:
+          context: cuda-exercise
+          file: cuda-exercise/Dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          pull: true
+
+      - name: Deploy build
+        id: docker_build_deploy
+        uses: docker/build-push-action@v6
+        with:
+          context: cuda-exercise
+          file: cuda-exercise/Dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          pull: true
+          push: ${{ github.event_name != 'pull_request' }}
